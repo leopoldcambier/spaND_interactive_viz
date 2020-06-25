@@ -105,17 +105,16 @@ class SpandVisualizer:
 
         # Initialize plot
         self.graph_matrix = figure(title='Graph', 
-                           x_range=(np.amin(X[0,:])-1,np.amax(X[0,:])+1), 
-                           y_range=(np.amin(X[1,:])-1,np.amax(X[1,:])+1), 
-                           tooltips=[("index", "$index"),("(x,y)", "($x, $y)")],
-                        #    tools=[BoxSelectTool(), LassoSelectTool()],
-                           tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select"
-                           )
+                                   x_range=(np.amin(X[0,:])-1,np.amax(X[0,:])+1), 
+                                   y_range=(np.amin(X[1,:])-1,np.amax(X[1,:])+1), 
+                                   tooltips=[("index", "$index"),("(x,y)", "($x, $y)")],
+                                   tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select"
+                                  )
 
         self.trailing_matrix = figure(title='Matrix',
                                       x_range=(0, self.N),
                                       y_range=(0, self.N)
-                                      )
+                                     )
 
         self.input_dofs = TextInput(title="Dofs to eliminate/sparsify (comma separated list)", value='')
         self.input_dofs.on_change('value', self.callback_highlight)
@@ -205,5 +204,5 @@ class SpandVisualizer:
 
 
 A = scipy.io.mmread("neglapl_2_5.mm").todense()
-X = scipy.io.mmread("5x5mm")
+X = scipy.io.mmread("5x5.mm")
 sv = SpandVisualizer(A, X)
