@@ -1,1 +1,1 @@
-web: bokeh serve --port=$PORT --use-xheaders --address=0.0.0.0 spandviz.py
+web: bokeh serve --port=$PORT --num-procs=0 --allow-websocket-origin=spandviz.herokuapp.com --address=0.0.0.0 --use-xheaders spandviz.py
