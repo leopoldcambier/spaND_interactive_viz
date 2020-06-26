@@ -1,1 +1,1 @@
-web: bokeh serve --port=$PORT --use-xheaders spandviz.py
+web: bokeh serve --port=$PORT --use-xheaders --address=0.0.0.0 spandviz.py
