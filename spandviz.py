@@ -5,7 +5,7 @@ import scipy.sparse
 
 from bokeh.io import output_file, show, curdoc
 from bokeh.layouts import column, row
-from bokeh.models import GraphRenderer, ColumnDataSource, GlyphRenderer, Circle, Oval, Plot, StaticLayoutProvider, Slider, TextInput, RadioButtonGroup, Button, Select
+from bokeh.models import GraphRenderer, IndexFilter, ColumnDataSource, CDSView, GlyphRenderer, Circle, Oval, Plot, StaticLayoutProvider, Slider, TextInput, RadioButtonGroup, Button, Select
 from bokeh.models.tools import LassoSelectTool, BoxSelectTool
 from bokeh.plotting import figure
 from bokeh.palettes import viridis
@@ -103,7 +103,8 @@ class SpandVisualizer:
         # The coordinates in the natural order
         self.X = X
         # The dofs not-yet eliminated in natural order
-        self.active_dofs = list(range(self.N))
+        all_dofs = list(range(self.N))
+        self.active_dofs = all_dofs
 
         # Initialize plot
         self.graph_matrix = figure(title='Graph', 
@@ -120,6 +121,28 @@ class SpandVisualizer:
                                       output_backend="webgl"
                                      )
 
+        # Set data sources
+        self.nodes_source = ColumnDataSource(dict(
+            index=all_dofs,
+            x=self.X[0,:],
+            y=self.X[1,:],
+        ))
+        self.nodes_source.selected.on_change('indices', self.callback_select)
+
+        edges = scipy.sparse.coo_matrix(self.A.A)
+        edges_source = ColumnDataSource(dict(start=edges.row,end=edges.col))
+
+        layout = StaticLayoutProvider(graph_layout=dict(zip(all_dofs, zip(self.X[0,:],self.X[1,:]))))
+
+        nodes_view = CDSView(source=self.nodes_source, filters=[IndexFilter([])])
+
+        # highlight_source = ColumnDataSource(dict(
+        #     index=[],
+        #     x=[],
+        #     y=[],
+        #     color=[]
+        # ))
+
         # Buttons and widgets
         self.input_dofs = TextInput(title="Dofs to eliminate/sparsify (comma separated list)", value='')
         self.input_dofs.on_change('value', self.callback_highlight)
@@ -128,10 +151,37 @@ class SpandVisualizer:
         self.sparsify_button  = Button(label="Sparsify", button_type="success")
         self.sparsify_button.on_click(self.callback_sparsify)
 
+        # Left graph
+        self.graph_matrix.graph(
+            self.nodes_source,
+            edges_source,
+            layout,
+        )
+
+        self.graph_matrix.scatter(
+            x="x",
+            y="y",
+            color="black",
+            source=self.nodes_source,
+            view=nodes_view,
+        )
+
+        # Right picture
+        self.trailing_matrix.image(
+            image=[self.get_mat()], 
+            x=0, 
+            y=0, 
+            dh=self.N, 
+            dw=self.N, 
+            palette=viridis(256)
+        )
+
         # Assemble all
         self.row_dofs   = row(self.input_dofs, width=600)
         self.row_choice = row(self.eliminate_button, self.sparsify_button, width=600)
         self.row_data   = row(self.graph_matrix, self.trailing_matrix, width=1400)
+
+        # Refresh
         self.update_plot()
 
     def eliminate(self, dofs):
@@ -146,19 +196,24 @@ class SpandVisualizer:
         print("Eliminate callback")
         dofs = [int(i) for i in self.input_dofs.value.split(',')]
         self.eliminate(dofs)
+        self.clear_selection()
         self.update_plot()
 
     def callback_sparsify(self, event):
         print("Sparsify callback")
         dofs = [int(i) for i in self.input_dofs.value.split(',')]
         self.sparsify(dofs, 0.5)
+        self.clear_selection()
         self.update_plot()
+
+    def clear_selection(self):
+        self.input_dofs.value = ""
 
     def callback_select(self, attr, old, new):
         print("Select callback")
-        dofs = [str(self.nodes_source.data['index'][i]) for i in new]
-        self.input_dofs.value = ",".join(dofs)
-        # self.update_plot()
+        selected = [self.nodes_source.data['index'][i] for i in new]
+        active_selected = [str(i) for i in sorted(list(set(self.active_dofs) & set(selected)))]
+        self.input_dofs.value = ",".join(active_selected)
 
     def callback_highlight(self, attr, old, new):
         print("Highlight callback")
@@ -171,53 +226,40 @@ class SpandVisualizer:
             highlight = []
         return highlight
 
-    def update_plot(self):
-
-        # Dofs to highlight
+    # Return right image
+    def get_mat(self):
         highlight = self.highlighted_dofs()
-
-        # Update graph
-        dofs  = [i for i in self.active_dofs]
-        edges = scipy.sparse.coo_matrix(self.A.A)
-
-        color = ['black' for i in dofs]
-        for (i,d) in enumerate(dofs):
-            if(d in highlight):
-                color[i] = 'red'
-
-        # Data
-        self.nodes_source = ColumnDataSource(dict(index=dofs,x=self.X[0,dofs],y=self.X[1,dofs],color=color))
-        self.nodes_source.selected.on_change('indices', self.callback_select)
-        self.edges_source = ColumnDataSource(dict(start=edges.row,end=edges.col))
-        self.layout       = StaticLayoutProvider(graph_layout=dict(zip(dofs, zip(self.X[0,dofs],self.X[1,dofs]))))
-
-        # Graph
-        self.graph_matrix.renderers = []
-        self.graph_matrix.graph(
-            self.nodes_source,
-            self.edges_source,
-            self.layout
-        )
-
-        self.graph_matrix.scatter(
-            x="x",
-            y="y",
-            color="color",
-            source=self.nodes_source
-        )
-
-        # Image
         matA = self.A.A
         matA = (matA != 0).astype(float)
         matA[np.ix_(highlight, highlight)] = 0.5 * matA[np.ix_(highlight, highlight)]
-        self.mat = np.identity(self.N)
+        mat = np.identity(self.N)
         n_inactive = self.N - len(self.active_dofs)
-        self.mat[n_inactive:,n_inactive:] = matA[np.ix_(self.active_dofs, self.active_dofs)]
-        self.mat = self.mat[::-1,:]
+        mat[n_inactive:,n_inactive:] = matA[np.ix_(self.active_dofs, self.active_dofs)]
+        mat = mat[::-1,:]
+        return mat
 
-        self.trailing_matrix.renderers = []
+    def get_edges(self):
+        Asp = scipy.sparse.coo_matrix(self.A.A)
+        return Asp.tocoo()
+
+    def update_plot(self):
+
+        # Update edges
+        edges = self.get_edges()
+        row = [i for i in edges.row if i in self.active_dofs]
+        col = [i for i in edges.col if i in self.active_dofs]
+        self.graph_matrix.renderers[0].edge_renderer.data_source.data = dict(
+            start=row,
+            end=col
+        )
+
+        # Dofs to highlight
+        highlight = self.highlighted_dofs()
+        self.graph_matrix.renderers[1].view = CDSView(source=self.nodes_source, filters=[IndexFilter(highlight)])
+
+        # Update image
         self.trailing_matrix.image(
-            image=[self.mat], 
+            image=[self.get_mat()], 
             x=0, 
             y=0, 
             dh=self.N, 
