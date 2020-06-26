@@ -5,7 +5,7 @@ import scipy.sparse
 
 from bokeh.io import output_file, show, curdoc
 from bokeh.layouts import column, row
-from bokeh.models import GraphRenderer, Oval, StaticLayoutProvider, Slider, TextInput, RadioButtonGroup, Button
+from bokeh.models import GraphRenderer, Oval, StaticLayoutProvider, Slider, TextInput, RadioButtonGroup, Button, Select
 from bokeh.models.tools import LassoSelectTool, BoxSelectTool
 from bokeh.plotting import figure
 from bokeh.palettes import viridis
@@ -92,7 +92,14 @@ class TrailingMatrix:
 
 class SpandVisualizer:
 
-    def __init__(self, A, X):
+    def __init__(self):
+        self.reset("neglapl_2_5.mm", "5x5.mm")
+
+    def reset(self, A_file, X_file):
+
+        # Load
+        A = scipy.io.mmread(A_file).todense()
+        X = scipy.io.mmread(X_file)
         self.N = A.shape[0]
         # the trailing matrix in the natural order
         self.A = TrailingMatrix(A)
@@ -108,13 +115,18 @@ class SpandVisualizer:
                                    x_range=(np.amin(X[0,:])-1,np.amax(X[0,:])+1), 
                                    y_range=(np.amin(X[1,:])-1,np.amax(X[1,:])+1), 
                                    tooltips=[("index", "$index"),("(x,y)", "($x, $y)")],
-                                   tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select"
+                                   tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select",
+                                #    output_backend="webgl"
                                   )
 
         self.trailing_matrix = figure(title='Matrix',
                                       x_range=(0, self.N),
-                                      y_range=(0, self.N)
+                                      y_range=(0, self.N),
+                                    #   output_backend="webgl"
                                      )
+
+        self.select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Naca 4", "Naca 8"])
+        self.select.on_change('value', self.callback_menu)
 
         self.input_dofs = TextInput(title="Dofs to eliminate/sparsify (comma separated list)", value='')
         self.input_dofs.on_change('value', self.callback_highlight)
@@ -124,11 +136,26 @@ class SpandVisualizer:
         self.sparsify_button.on_click(self.callback_sparsify)
 
         self.update_plot()
+        menu   = row(self.select, width=400)
         dofs   = row(self.input_dofs, width=600)
         choice = row(self.eliminate_button, self.sparsify_button, width=600)
         data   = row(self.graph_matrix, self.trailing_matrix, width=1400)
-        curdoc().add_root(column(dofs, choice, data))
+        if hasattr(self, 'document'):
+            curdoc().remove_root(self.document)
+        self.document = column(menu, dofs, choice, data)
+        curdoc().add_root(self.document)
         curdoc().title = "spaND viz"
+
+    def callback_menu(self, attr, old, new):
+        print("Menu callback")
+        if(new == "Poisson 5x5"):
+            self.reset("neglapl_2_5.mm", "5x5.mm")
+        elif(new == "Poisson 16x16"):
+            self.reset("neglapl_2_16.mm", "16x16.mm")
+        elif(new == "Naca 4"):
+            self.reset("naca4_jac.mm", "naca4_coo.mm")
+        elif(new == "Naca 8"):
+            self.reset("naca8_jac.mm", "naca8_coo.mm")
 
     def callback_eliminate(self, event):
         print("Eliminate callback")
@@ -173,12 +200,12 @@ class SpandVisualizer:
                 colors[i] = 'red'
 
         self.graph = GraphRenderer()
-        self.graph.node_renderer.data_source.data = dict(index=dofs,x=X[0,dofs],y=X[1,dofs],colors=colors)
+        self.graph.node_renderer.data_source.data = dict(index=dofs,x=self.X[0,dofs],y=self.X[1,dofs],colors=colors)
         self.graph.node_renderer.glyph.fill_color = "colors"
         self.graph.node_renderer.glyph.line_color = "colors"
         self.graph.node_renderer.data_source.selected.on_change('indices', self.callback_select)
         self.graph.edge_renderer.data_source.data = dict(start=edges.row,end=edges.col)
-        graph_layout = dict(zip(dofs, zip(X[0,dofs],X[1,dofs])))
+        graph_layout = dict(zip(dofs, zip(self.X[0,dofs],self.X[1,dofs])))
         self.graph.layout_provider = StaticLayoutProvider(graph_layout=graph_layout)
         self.graph_matrix.renderers = [self.graph]
 
@@ -202,7 +229,4 @@ class SpandVisualizer:
         self.active_dofs = [d for d in self.active_dofs if (d not in dofs[rank:])]
         # Later we will improve this based on coordinates
 
-
-A = scipy.io.mmread("neglapl_2_5.mm").todense()
-X = scipy.io.mmread("5x5.mm")
-sv = SpandVisualizer(A, X)
+sv = SpandVisualizer()
