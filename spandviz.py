@@ -1,11 +1,14 @@
 import numpy as np
+import numpy.linalg as nla
 import scipy.linalg as la
 import scipy.io
 import scipy.sparse
 
 from bokeh.io import output_file, show, curdoc
 from bokeh.layouts import column, row
-from bokeh.models import GraphRenderer, IndexFilter, ColumnDataSource, CDSView, GlyphRenderer, Circle, Oval, Plot, StaticLayoutProvider, Slider, TextInput, RadioButtonGroup, Button, Select
+from bokeh.models import GraphRenderer, IndexFilter, ColumnDataSource, CDSView, GlyphRenderer, \
+                         Circle, Oval, Plot, StaticLayoutProvider, Slider, TextInput, \
+                         RadioButtonGroup, Button, Select, CheckboxGroup
 from bokeh.models.tools import LassoSelectTool, BoxSelectTool
 from bokeh.plotting import figure
 from bokeh.palettes import viridis
@@ -49,6 +52,22 @@ class TrailingMatrix:
         self.A[np.ix_(other_dofs, dofs)] = Lns
         self.A[np.ix_(dofs, dofs)]       = np.identity(len(dofs))
 
+    # Get edges
+    def edges(self, dofs):
+        other_dofs = self.complement(dofs)
+        Asn = self.submatrix(dofs, other_dofs)
+        Ans = self.submatrix(other_dofs, dofs)
+        Asn_ns = np.concatenate((Asn, Ans.T), axis=1)
+        col_norms = nla.norm(Asn_ns, axis=0, ord=np.inf)
+        maxi = np.amax(col_norms)
+        Asn_ns_trimmed = Asn_ns[:,col_norms > 1e-12 * maxi]
+        return Asn_ns_trimmed
+
+    def get_svds(self, dofs):
+        Asn_ns = self.edges(dofs)
+        (U, s, VT) = la.svd(Asn_ns)
+        return s
+    
     # Sparsify
     def sparsify(self, dofs, tol=0.5):
         
@@ -92,6 +111,27 @@ class TrailingMatrix:
 
 class SpandVisualizer:
 
+    def get_figure_graph_matrix(self):
+        return figure(title='Graph', 
+                      x_range=(np.amin(self.X[0,:])-1,np.amax(self.X[0,:])+1), 
+                      y_range=(np.amin(self.X[1,:])-1,np.amax(self.X[1,:])+1),
+                      tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select",
+                      output_backend="webgl"
+                      )
+
+    def get_figure_trailing_matrix(self):
+        return figure(title='Matrix',
+                      x_range=(0, self.N),
+                      y_range=(0, self.N),
+                      output_backend="webgl"
+                      )
+
+    def get_figure_svds_plot(self):
+        return figure(title='Singular values of edges of selected vertices',
+                      y_axis_type="log",
+                      output_backend="webgl"
+                      )
+
     def __init__(self, A_file, X_file):
 
         # Load
@@ -106,89 +146,30 @@ class SpandVisualizer:
         all_dofs = list(range(self.N))
         self.active_dofs = all_dofs
 
-        # Initialize plot
-        self.graph_matrix = figure(title='Graph', 
-                                   x_range=(np.amin(X[0,:])-1,np.amax(X[0,:])+1), 
-                                   y_range=(np.amin(X[1,:])-1,np.amax(X[1,:])+1), 
-                                   tooltips=[("index", "$index")],
-                                   tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select",
-                                   output_backend="webgl"
-                                  )
-
-        self.trailing_matrix = figure(title='Matrix',
-                                      x_range=(0, self.N),
-                                      y_range=(0, self.N),
-                                      output_backend="webgl"
-                                     )
-
-        # Set data sources
-        self.nodes_source = ColumnDataSource(dict(
-            index=all_dofs,
-            x=self.X[0,:],
-            y=self.X[1,:],
-        ))
-        self.nodes_source.selected.on_change('indices', self.callback_select)
-
-        edges = scipy.sparse.coo_matrix(self.A.A)
-        edges_source = ColumnDataSource(dict(start=edges.row,end=edges.col))
-
-        layout = StaticLayoutProvider(graph_layout=dict(zip(all_dofs, zip(self.X[0,:],self.X[1,:]))))
-
-        nodes_view = CDSView(source=self.nodes_source, filters=[IndexFilter([])])
-
-        # highlight_source = ColumnDataSource(dict(
-        #     index=[],
-        #     x=[],
-        #     y=[],
-        #     color=[]
-        # ))
-
         # Buttons and widgets
         self.input_dofs = TextInput(title="Dofs to eliminate/sparsify (comma separated list)", value='')
         self.input_dofs.on_change('value', self.callback_highlight)
-        self.eliminate_button = Button(label="Eliminate", button_type="success")
-        self.eliminate_button.on_click(self.callback_eliminate)
-        self.sparsify_button  = Button(label="Sparsify", button_type="success")
-        self.sparsify_button.on_click(self.callback_sparsify)
-
-        # Left graph
-        self.graph_matrix.graph(
-            self.nodes_source,
-            edges_source,
-            layout,
-        )
-
-        self.graph_matrix.scatter(
-            x="x",
-            y="y",
-            color="black",
-            source=self.nodes_source,
-            view=nodes_view,
-        )
-
-        # Right picture
-        self.trailing_matrix.image(
-            image=[self.get_mat()], 
-            x=0, 
-            y=0, 
-            dh=self.N, 
-            dw=self.N, 
-            palette=viridis(256)
-        )
+        eliminate_button = Button(label="Eliminate", button_type="success")
+        eliminate_button.on_click(self.callback_eliminate)
+        sparsify_button  = Button(label="Sparsify", button_type="success")
+        sparsify_button.on_click(self.callback_sparsify)
+        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
 
         # Assemble all
         self.row_dofs   = row(self.input_dofs, width=600)
-        self.row_choice = row(self.eliminate_button, self.sparsify_button, width=600)
-        self.row_data   = row(self.graph_matrix, self.trailing_matrix, width=1400)
+        self.row_choice = row(eliminate_button, sparsify_button, self.options_checkbox, width=900)
+        self.row_data   = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
 
         # Refresh
         self.update_plot()
 
     def eliminate(self, dofs):
+        print("Eliminating ", dofs)
         self.A.eliminate(dofs)
         self.active_dofs = [d for d in self.active_dofs if (d not in dofs)]
 
     def sparsify(self, dofs, tol=0.5):
+        print("Sparsifying ", dofs)
         rank = self.A.sparsify(dofs, tol)
         self.active_dofs = [d for d in self.active_dofs if (d not in dofs[rank:])]
 
@@ -197,14 +178,12 @@ class SpandVisualizer:
         dofs = [int(i) for i in self.input_dofs.value.split(',')]
         self.eliminate(dofs)
         self.clear_selection()
-        self.update_plot()
 
     def callback_sparsify(self, event):
         print("Sparsify callback")
         dofs = [int(i) for i in self.input_dofs.value.split(',')]
         self.sparsify(dofs, 0.5)
         self.clear_selection()
-        self.update_plot()
 
     def clear_selection(self):
         self.input_dofs.value = ""
@@ -212,8 +191,10 @@ class SpandVisualizer:
     def callback_select(self, attr, old, new):
         print("Select callback")
         selected = [self.nodes_source.data['index'][i] for i in new]
-        active_selected = [str(i) for i in sorted(list(set(self.active_dofs) & set(selected)))]
+        active_selected_int = list(sorted(list(set(self.active_dofs) & set(selected))))
+        active_selected = [str(i) for i in active_selected_int]
         self.input_dofs.value = ",".join(active_selected)
+        self.update_plot()
 
     def callback_highlight(self, attr, old, new):
         print("Highlight callback")
@@ -244,21 +225,50 @@ class SpandVisualizer:
 
     def update_plot(self):
 
+        print("Updating")
+
         # Update edges
-        edges = self.get_edges()
-        row = [i for i in edges.row if i in self.active_dofs]
-        col = [i for i in edges.col if i in self.active_dofs]
-        self.graph_matrix.renderers[0].edge_renderer.data_source.data = dict(
-            start=row,
-            end=col
+        active = self.active_dofs
+        if(0 in self.options_checkbox.active):
+            edges = self.get_edges()
+            row = [i for i in edges.row if i in active]
+            col = [i for i in edges.col if i in active]
+            edges_source = ColumnDataSource(dict(
+                xs=[ [self.X[0,i],self.X[0,j]] for (i,j) in zip(row,col) ],
+                ys=[ [self.X[1,i],self.X[1,j]] for (i,j) in zip(row,col) ]
+            ))
+        else:
+            edges_source = ColumnDataSource(dict(
+                xs=[],
+                ys=[],
+            ))
+    
+        # Update nodes
+        self.nodes_source = ColumnDataSource(dict(
+            index=active,
+            x=self.X[0,active],
+            y=self.X[1,active],
+            color=['black' for i in active],
+        ))
+        self.nodes_source.selected.on_change('indices', self.callback_select)
+
+        # Left graph
+        graph_matrix = self.get_figure_graph_matrix()
+        graph_matrix.multi_line(
+            xs="xs",
+            ys="ys",
+            source=edges_source
+        )
+        graph_matrix.scatter(
+            x="x",
+            y="y",
+            color="color",
+            source=self.nodes_source,
         )
 
-        # Dofs to highlight
-        highlight = self.highlighted_dofs()
-        self.graph_matrix.renderers[1].view = CDSView(source=self.nodes_source, filters=[IndexFilter(highlight)])
-
-        # Update image
-        self.trailing_matrix.image(
+        # Middle picture
+        trailing_matrix = self.get_figure_trailing_matrix()
+        trailing_matrix.image(
             image=[self.get_mat()], 
             x=0, 
             y=0, 
@@ -266,6 +276,29 @@ class SpandVisualizer:
             dw=self.N, 
             palette=viridis(256)
         )
+
+        # Svds
+        svds = []
+        if(1 in self.options_checkbox.active):
+            active_selected_int = self.highlighted_dofs()
+            if(len(active_selected_int) > 0):
+                svds = self.A.get_svds(active_selected_int)
+                if(len(svds) > 0):
+                    svds = svds / svds[0]
+        svds_source = ColumnDataSource(dict(
+            x=np.arange(len(svds)),
+            y=svds,
+        ))
+
+        svds_plot = self.get_figure_svds_plot()
+        svds_plot.line(
+            x="x",
+            y="y",
+            color="black",
+            source=svds_source,
+        )
+
+        self.row_data.children = [graph_matrix, trailing_matrix, svds_plot]
 
 #### Top level app
 
@@ -278,7 +311,7 @@ def update():
         sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm")
     elif(select.value == "Naca 8"):
         sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm")
-    document = column(select, sv.row_dofs, sv.row_choice, sv.row_data)
+    document = column(row(select, width=600), sv.row_dofs, sv.row_choice, sv.row_data)
     curdoc().clear()
     curdoc().add_root(document)
     curdoc().title = "spaND viz"
