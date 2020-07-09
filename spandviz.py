@@ -116,10 +116,14 @@ class TrailingMatrix:
 class SpandVisualizer:
 
     def get_figure_graph_matrix(self):
+        if self.stepping == "manual":
+            tools = ["box_select"]
+        else:
+            tools = []
         return figure(title='Graph', 
                       x_range=(np.amin(self.X[0,:])-1,np.amax(self.X[0,:])+1), 
                       y_range=(np.amin(self.X[1,:])-1,np.amax(self.X[1,:])+1),
-                      tools = "box_select",
+                      tools = tools,
                       output_backend="webgl",
                       width=500,
                       height=500,
