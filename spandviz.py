@@ -132,12 +132,18 @@ class SpandVisualizer:
                       output_backend="webgl"
                       )
 
-    def __init__(self, A_file, X_file):
+    def __init__(self, A_file, X_file, stepping, p_file):
 
         # Load
         A = scipy.io.mmread(A_file).todense()
         X = scipy.io.mmread(X_file)
         self.N = A.shape[0]
+        if(p_file is not None):
+            perm = scipy.io.mmread(p_file).reshape((-1,))
+        else:
+            perm = np.arange(self.N)
+        A = A[np.ix_(perm,perm)]
+        X = X[:,perm]
         # The trailing matrix in the natural order
         self.A = TrailingMatrix(A)
         # The coordinates in the natural order
@@ -153,14 +159,30 @@ class SpandVisualizer:
         eliminate_button.on_click(self.callback_eliminate)
         sparsify_button  = Button(label="Sparsify", button_type="success")
         sparsify_button.on_click(self.callback_sparsify)
+        step_button = Button(label="Step and eliminate", button_type="success")
+        step_button.on_click(self.callback_step)
         self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
 
         # Assemble all
-        self.row_dofs   = row(self.input_dofs, width=600)
-        self.row_choice = row(eliminate_button, sparsify_button, self.options_checkbox, width=900)
-        self.row_data   = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
+        if stepping == "manual":
+            buttons     = column(row(self.input_dofs, width=600), row(eliminate_button, sparsify_button, self.options_checkbox, width=900))
+            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
+            self.layout = column(buttons, data)
+        else:
+            buttons     = row(step_button, width=600)
+            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
+            self.layout = column(buttons, data)
+
 
         # Refresh
+        self.update_plot()
+
+    def get_layout(self):
+        return self.layout
+
+    def callback_step(self, event):
+        dofs = self.active_dofs[:min(len(self.active_dofs),10)]
+        self.eliminate(dofs)
         self.update_plot()
 
     def eliminate(self, dofs):
@@ -187,14 +209,6 @@ class SpandVisualizer:
 
     def clear_selection(self):
         self.input_dofs.value = ""
-
-    def callback_select(self, attr, old, new):
-        print("Select callback")
-        selected = [self.nodes_source.data['index'][i] for i in new]
-        active_selected_int = list(sorted(list(set(self.active_dofs) & set(selected))))
-        active_selected = [str(i) for i in active_selected_int]
-        self.input_dofs.value = ",".join(active_selected)
-        self.update_plot()
 
     def callback_highlight(self, attr, old, new):
         print("Highlight callback")
@@ -226,9 +240,36 @@ class SpandVisualizer:
     def update_plot(self):
 
         print("Updating")
+        active = self.active_dofs
+        highlighted = self.highlighted_dofs()
+
+        # Update nodes
+        if len(highlighted) == 0:
+            nodes_source = ColumnDataSource(dict(
+                index=active,
+                x=self.X[0,active],
+                y=self.X[1,active],
+                color=['black' for i in active],
+            ))
+        else:
+            nodes_source = ColumnDataSource(dict(
+                index=highlighted,
+                x=self.X[0,highlighted],
+                y=self.X[1,highlighted],
+                color=['black' for i in highlighted],
+            ))
+
+        def callback_select(attr, old, new):
+            print("Select callback")
+            selected = [nodes_source.data['index'][i] for i in new]
+            active_selected = list(sorted(list(set(active) & set(selected))))
+            active_selected_str = [str(i) for i in active_selected]
+            self.input_dofs.value = ",".join(active_selected_str)
+            self.update_plot()
+
+        nodes_source.selected.on_change('indices', callback_select)
 
         # Update edges
-        active = self.active_dofs
         if(0 in self.options_checkbox.active):
             edges = self.get_edges()
             row = [i for i in edges.row if i in active]
@@ -243,14 +284,6 @@ class SpandVisualizer:
                 ys=[],
             ))
     
-        # Update nodes
-        self.nodes_source = ColumnDataSource(dict(
-            index=active,
-            x=self.X[0,active],
-            y=self.X[1,active],
-            color=['black' for i in active],
-        ))
-        self.nodes_source.selected.on_change('indices', self.callback_select)
 
         # Left graph
         graph_matrix = self.get_figure_graph_matrix()
@@ -263,7 +296,7 @@ class SpandVisualizer:
             x="x",
             y="y",
             color="color",
-            source=self.nodes_source,
+            source=nodes_source,
         )
 
         # Middle picture
@@ -298,20 +331,37 @@ class SpandVisualizer:
             source=svds_source,
         )
 
-        self.row_data.children = [graph_matrix, trailing_matrix, svds_plot]
+        self.layout.children[1].children = [graph_matrix, trailing_matrix, svds_plot]
 
 #### Top level app
 
 select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Naca 8"])
+ordering = RadioButtonGroup(labels=["Manual ordering", "Nested Dissection", "Topological"], active=0)
 
 def update():
+    ordering_kind = ordering.active
+    
+    if ordering_kind == 0:
+        stepping_kind = "manual"
+    else:
+        stepping_kind = "step"
+
     if(select.value == "Poisson 5x5"):
-        sv = SpandVisualizer("neglapl_2_5.mm", "5x5.mm")
+        if ordering_kind == 1: # ND
+            sv = SpandVisualizer("neglapl_2_5.mm", "5x5.mm", stepping_kind, "neglapl_2_5.mm.ndperm")
+        else:
+            sv = SpandVisualizer("neglapl_2_5.mm", "5x5.mm", stepping_kind, None)
     elif(select.value == "Poisson 16x16"):
-        sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm")
+        if ordering_kind == 1: # ND
+            sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, "neglapl_2_16.mm.ndperm")
+        else:
+            sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, None)
     elif(select.value == "Naca 8"):
-        sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm")
-    document = column(row(select, width=600), sv.row_dofs, sv.row_choice, sv.row_data)
+        if ordering_kind == 1: # ND
+            sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm", stepping_kind, "naca8_jac_trimmed.mm.ndperm")
+        else:
+            sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm", stepping_kind, None)
+    document = column(row(select, width=600), row(ordering, width=600), sv.get_layout())
     curdoc().clear()
     curdoc().add_root(document)
     curdoc().title = "spaND viz"
@@ -321,5 +371,6 @@ def callback_menu(attr, old, new):
     update()
 
 select.on_change('value', callback_menu)
+ordering.on_change('active', callback_menu)
 
 update()
