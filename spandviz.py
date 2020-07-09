@@ -9,8 +9,7 @@ from bokeh.io import output_file, show, curdoc
 from bokeh.layouts import column, row
 from bokeh.models import GraphRenderer, IndexFilter, ColumnDataSource, CDSView, GlyphRenderer, \
                          Circle, Oval, Plot, StaticLayoutProvider, Slider, TextInput, \
-                         RadioButtonGroup, Button, Select, CheckboxGroup
-from bokeh.models.tools import LassoSelectTool, BoxSelectTool
+                         RadioButtonGroup, Button, Select, CheckboxGroup, Paragraph, Div
 from bokeh.plotting import figure
 from bokeh.palettes import viridis
 
@@ -120,21 +119,27 @@ class SpandVisualizer:
         return figure(title='Graph', 
                       x_range=(np.amin(self.X[0,:])-1,np.amax(self.X[0,:])+1), 
                       y_range=(np.amin(self.X[1,:])-1,np.amax(self.X[1,:])+1),
-                      tools = "pan,wheel_zoom,box_zoom,reset,box_select,lasso_select",
-                      output_backend="webgl"
+                      tools = "box_select",
+                      output_backend="webgl",
+                      width=500,
+                      height=500,
                       )
 
     def get_figure_trailing_matrix(self):
         return figure(title='Matrix',
                       x_range=(0, self.N),
                       y_range=(0, self.N),
-                      output_backend="webgl"
+                      output_backend="webgl",
+                      width=500,
+                      height=500,
                       )
 
     def get_figure_svds_plot(self):
         return figure(title='Singular values of edges of selected vertices',
                       y_axis_type="log",
-                      output_backend="webgl"
+                      output_backend="webgl",
+                      width=500,
+                      height=500,
                       )
 
     def __init__(self, A_file, X_file, stepping, p_file):
@@ -159,28 +164,28 @@ class SpandVisualizer:
         self.active_dofs = all_dofs
 
         # Buttons and widgets
-        self.input_dofs = TextInput(title="Vertices to eliminate/sparsify (comma separated list)", value='')
+        self.input_dofs = TextInput(title="Vertices to eliminate/sparsify (comma separated list)", value='', width=250)
         self.input_dofs.on_change('value', self.callback_highlight)
-        reset_button = Button(label="Reset selection", button_type="success")
+        reset_button = Button(label="Reset selection", button_type="success", width=250)
         reset_button.on_click(self.callback_clear_selection)
-        eliminate_button = Button(label="Eliminate", button_type="success")
+        eliminate_button = Button(label="Eliminate", button_type="success", width=250)
         eliminate_button.on_click(self.callback_eliminate)
-        sparsify_button  = Button(label="Sparsify", button_type="success")
+        sparsify_button  = Button(label="Sparsify", button_type="success", width=250)
         sparsify_button.on_click(self.callback_sparsify)
-        step_button = Button(label="Step and eliminate", button_type="success")
+        step_button = Button(label="Step and eliminate", button_type="success", width=250)
         step_button.on_click(self.callback_step)
-        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
+        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1], width=250)
         self.options_checkbox.on_change('active', self.callback_checkbox)
         self.step_size = TextInput(value="10", title="Step size")
 
         # Assemble all
         if stepping == "manual":
-            buttons     = column(row(self.input_dofs, width=600), row(reset_button, width=600), row(eliminate_button, sparsify_button, self.options_checkbox, width=900))
-            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
+            buttons     = column(self.input_dofs, reset_button, row(eliminate_button, sparsify_button, self.options_checkbox))
+            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot())
             self.layout = column(buttons, data)
         else:
-            buttons     = column(row(step_button, self.options_checkbox, width=600), row(self.step_size, width=300))
-            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), width=1200)
+            buttons     = column(row(step_button, self.options_checkbox), self.step_size)
+            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix())
             self.layout = column(buttons, data)
 
 
@@ -331,36 +336,57 @@ class SpandVisualizer:
             palette=viridis(256)
         )
 
-        # Svds
-        svds = []
-        if(1 in self.options_checkbox.active):
-            active_selected_int = self.highlighted_dofs()
-            if(len(active_selected_int) > 0):
-                svds = self.A.get_svds(active_selected_int)
-                if(len(svds) > 0):
-                    svds = svds / svds[0]
-        svds_source = ColumnDataSource(dict(
-            x=np.arange(len(svds)),
-            y=svds,
-        ))
-
-        svds_plot = self.get_figure_svds_plot()
-        svds_plot.line(
-            x="x",
-            y="y",
-            color="black",
-            source=svds_source,
-        )
 
         if self.stepping == "manual":
+            
+            # Svds
+            svds = []
+            if(1 in self.options_checkbox.active):
+                active_selected_int = self.highlighted_dofs()
+                if(len(active_selected_int) > 0):
+                    svds = self.A.get_svds(active_selected_int)
+                    if(len(svds) > 0):
+                        svds = svds / svds[0]
+            svds_source = ColumnDataSource(dict(
+                x=np.arange(len(svds)),
+                y=svds,
+            ))
+
+            svds_plot = self.get_figure_svds_plot()
+            svds_plot.line(
+                x="x",
+                y="y",
+                color="black",
+                source=svds_source,
+            )
+
             self.layout.children[1].children = [graph_matrix, trailing_matrix, svds_plot]
         else:
             self.layout.children[1].children = [graph_matrix, trailing_matrix]
 
 #### Top level app
 
-select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Poisson 32x32", "Naca 8"])
-ordering = RadioButtonGroup(labels=["Manual ordering", "Nested Dissection", "Topological"], active=0)
+select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Poisson 32x32", "Naca 8"], width=200)
+ordering = RadioButtonGroup(labels=["Manual ordering", "Nested Dissection", "Topological"], active=0, width=400)
+title = Div(text="""<h1>spaND visualizationt tool</h1><p>Scroll down for help</p>""")
+
+description = Div(text=\
+    """ <p>This tools lets you explore elimination (and sparsification) orders and how they affect a matrix sparsity pattern.
+        The central figures show
+        <ul><li>Left: the matrix graph (i.e., there is an edge between i and j if A(i,j) or A(j,i) are non zero in the (trailing) matrix)</li>
+            <li>Center: the matrix itself, with zero entries in purple and non zero entries in yellow</li>
+            <li>Right: if active, it shows the singular values of the [A(s,n) A(n,s)^T] block, where s are the select vertices and n are all their neighbors in the matrix graph</li>
+        </ul>
+        How to use it:        
+        <ol>
+        <li>Select a problem at the very top by choosing between the three proposed problems</li>
+        <li>You can then pick between manually chosing nodes to eliminated ("Manual ordering") or using a predefined\
+            "Nested Dissection" (good) or "Topological" (arbitrary, bad in general) ordering</li>
+        <li><ul>
+            <li>In the manual case: select nodes by using the "box selection" tool, then click on "Eliminate". You can reset your selection with the "Reset selection" button.</li>
+            <li>In the predefined ordering case, simply select how many nodes to eliminated using the box and click on "Step and eliminate" to eliminate the next 'x' vertices
+            </ul></li>
+        <li>To make plotting faster you can disable edges plotting (uncheck "Show edges") and singular values display ("Show singular values")</li></ol></p>""", width=400, height=100)
 
 def update():
     ordering_kind = ordering.active
@@ -389,7 +415,7 @@ def update():
         perm_file = None
     
     sv = SpandVisualizer(matrix_file, coo_file, stepping_kind, perm_file)
-    document = column(row(select, width=600), row(ordering, width=600), sv.get_layout())
+    document = column(title, row(select, ordering), sv.get_layout(), description)
     curdoc().clear()
     curdoc().add_root(document)
     curdoc().title = "spaND viz"
