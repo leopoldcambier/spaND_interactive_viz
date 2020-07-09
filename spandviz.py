@@ -3,6 +3,7 @@ import numpy.linalg as nla
 import scipy.linalg as la
 import scipy.io
 import scipy.sparse
+import time
 
 from bokeh.io import output_file, show, curdoc
 from bokeh.layouts import column, row
@@ -16,7 +17,14 @@ from bokeh.palettes import viridis
 class TrailingMatrix:
 
     def complement(self, dofs):
-        other_dofs = [i for i in range(self.A.shape[0]) if i not in dofs]
+        other_dofs = np.array([i for i in range(self.A.shape[0]) if i not in dofs])
+        Asn = self.submatrix(dofs, other_dofs)
+        Ans = self.submatrix(other_dofs, dofs)
+        Asn_col_norms = nla.norm(Asn, axis=0, ord=np.inf)
+        Asn_other_dofs = other_dofs[Asn_col_norms > 0]
+        AnsT_col_norms = nla.norm(Ans.T, axis=0, ord=np.inf)
+        AnsT_other_dofs = other_dofs[AnsT_col_norms > 0]
+        other_dofs = np.unique(np.concatenate([Asn_other_dofs, AnsT_other_dofs]))
         return other_dofs
     
     def submatrix(self, n1, n2):
@@ -58,10 +66,7 @@ class TrailingMatrix:
         Asn = self.submatrix(dofs, other_dofs)
         Ans = self.submatrix(other_dofs, dofs)
         Asn_ns = np.concatenate((Asn, Ans.T), axis=1)
-        col_norms = nla.norm(Asn_ns, axis=0, ord=np.inf)
-        maxi = np.amax(col_norms)
-        Asn_ns_trimmed = Asn_ns[:,col_norms > 1e-12 * maxi]
-        return Asn_ns_trimmed
+        return Asn_ns
 
     def get_svds(self, dofs):
         Asn_ns = self.edges(dofs)
@@ -71,8 +76,8 @@ class TrailingMatrix:
     # Sparsify
     def sparsify(self, dofs, tol=0.5):
         
-        self.scale(dofs)
         other_dofs = self.complement(dofs)
+        self.scale(dofs)
 
         Ass = self.submatrix(dofs, dofs)
         Asn = self.submatrix(dofs, other_dofs)
@@ -98,8 +103,8 @@ class TrailingMatrix:
     # Eliminate
     def eliminate(self, dofs):
 
-        self.scale(dofs)
         other_dofs = self.complement(dofs)
+        self.scale(dofs)
         
         Asn = self.submatrix(dofs, other_dofs)
         Ans = self.submatrix(other_dofs, dofs)
@@ -138,6 +143,7 @@ class SpandVisualizer:
         A = scipy.io.mmread(A_file).todense()
         X = scipy.io.mmread(X_file)
         self.N = A.shape[0]
+        self.stepping = stepping
         if(p_file is not None):
             perm = scipy.io.mmread(p_file).reshape((-1,))
         else:
@@ -153,25 +159,27 @@ class SpandVisualizer:
         self.active_dofs = all_dofs
 
         # Buttons and widgets
-        self.input_dofs = TextInput(title="Dofs to eliminate/sparsify (comma separated list)", value='')
+        self.input_dofs = TextInput(title="Vertices to eliminate/sparsify (comma separated list)", value='')
         self.input_dofs.on_change('value', self.callback_highlight)
+        reset_button = Button(label="Reset selection", button_type="success")
+        reset_button.on_click(self.callback_clear_selection)
         eliminate_button = Button(label="Eliminate", button_type="success")
         eliminate_button.on_click(self.callback_eliminate)
         sparsify_button  = Button(label="Sparsify", button_type="success")
         sparsify_button.on_click(self.callback_sparsify)
         step_button = Button(label="Step and eliminate", button_type="success")
         step_button.on_click(self.callback_step)
-        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[1])
+        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
         self.step_size = TextInput(value="10", title="Step size")
 
         # Assemble all
         if stepping == "manual":
-            buttons     = column(row(self.input_dofs, width=600), row(eliminate_button, sparsify_button, self.options_checkbox, width=900))
+            buttons     = column(row(self.input_dofs, width=600), row(reset_button, width=600), row(eliminate_button, sparsify_button, self.options_checkbox, width=900))
             data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
             self.layout = column(buttons, data)
         else:
             buttons     = column(row(step_button, self.options_checkbox, width=600), row(self.step_size, width=300))
-            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
+            data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), width=1200)
             self.layout = column(buttons, data)
 
 
@@ -208,6 +216,9 @@ class SpandVisualizer:
         print("Sparsify callback")
         dofs = [int(i) for i in self.input_dofs.value.split(',')]
         self.sparsify(dofs, 0.5)
+        self.clear_selection()
+
+    def callback_clear_selection(self, event):
         self.clear_selection()
 
     def clear_selection(self):
@@ -253,13 +264,15 @@ class SpandVisualizer:
                 x=self.X[0,active],
                 y=self.X[1,active],
                 color=['black' for i in active],
+                alpha=[1.0 for i in active],
             ))
         else:
             nodes_source = ColumnDataSource(dict(
-                index=highlighted,
-                x=self.X[0,highlighted],
-                y=self.X[1,highlighted],
-                color=['black' for i in highlighted],
+                index=active,
+                x=self.X[0,active],
+                y=self.X[1,active],
+                color=['black' for i in active],
+                alpha=[1.0 if i in highlighted else 0.1 for i in active],
             ))
 
         def callback_select(attr, old, new):
@@ -299,6 +312,7 @@ class SpandVisualizer:
             x="x",
             y="y",
             color="color",
+            alpha="alpha",
             source=nodes_source,
         )
 
@@ -334,7 +348,10 @@ class SpandVisualizer:
             source=svds_source,
         )
 
-        self.layout.children[1].children = [graph_matrix, trailing_matrix, svds_plot]
+        if self.stepping == "manual":
+            self.layout.children[1].children = [graph_matrix, trailing_matrix, svds_plot]
+        else:
+            self.layout.children[1].children = [graph_matrix, trailing_matrix]
 
 #### Top level app
 
