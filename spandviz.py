@@ -170,6 +170,7 @@ class SpandVisualizer:
         step_button = Button(label="Step and eliminate", button_type="success")
         step_button.on_click(self.callback_step)
         self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
+        self.options_checkbox.on_change('active', self.callback_checkbox)
         self.step_size = TextInput(value="10", title="Step size")
 
         # Assemble all
@@ -223,6 +224,9 @@ class SpandVisualizer:
 
     def clear_selection(self):
         self.input_dofs.value = ""
+
+    def callback_checkbox(self, attr, old, new):
+        self.update_plot()
 
     def callback_highlight(self, attr, old, new):
         print("Highlight callback")
