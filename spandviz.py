@@ -161,7 +161,8 @@ class SpandVisualizer:
         sparsify_button.on_click(self.callback_sparsify)
         step_button = Button(label="Step and eliminate", button_type="success")
         step_button.on_click(self.callback_step)
-        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[0, 1])
+        self.options_checkbox = CheckboxGroup(labels=["Show edges","Show singular values"], active=[1])
+        self.step_size = TextInput(value="10", title="Step size")
 
         # Assemble all
         if stepping == "manual":
@@ -169,7 +170,7 @@ class SpandVisualizer:
             data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
             self.layout = column(buttons, data)
         else:
-            buttons     = row(step_button, width=600)
+            buttons     = column(row(step_button, self.options_checkbox, width=600), row(self.step_size, width=300))
             data        = row(self.get_figure_graph_matrix(), self.get_figure_trailing_matrix(), self.get_figure_svds_plot(), width=1800)
             self.layout = column(buttons, data)
 
@@ -181,7 +182,9 @@ class SpandVisualizer:
         return self.layout
 
     def callback_step(self, event):
-        dofs = self.active_dofs[:min(len(self.active_dofs),10)]
+        size = int(self.step_size.value)
+        print("Stepping by ", size)
+        dofs = self.active_dofs[:min(len(self.active_dofs),size)]
         self.eliminate(dofs)
         self.update_plot()
 
@@ -335,7 +338,7 @@ class SpandVisualizer:
 
 #### Top level app
 
-select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Naca 8"])
+select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Poisson 32x32", "Naca 8"])
 ordering = RadioButtonGroup(labels=["Manual ordering", "Nested Dissection", "Topological"], active=0)
 
 def update():
@@ -356,6 +359,11 @@ def update():
             sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, "neglapl_2_16.mm.ndperm")
         else:
             sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, None)
+    elif(select.value == "Poisson 32x32"):
+        if ordering_kind == 1: # ND
+            sv = SpandVisualizer("neglapl_2_32.mm", "32x32.mm", stepping_kind, "neglapl_2_32.mm.ndperm")
+        else:
+            sv = SpandVisualizer("neglapl_2_32.mm", "32x32.mm", stepping_kind, None)
     elif(select.value == "Naca 8"):
         if ordering_kind == 1: # ND
             sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm", stepping_kind, "naca8_jac_trimmed.mm.ndperm")
