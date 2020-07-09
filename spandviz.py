@@ -350,25 +350,24 @@ def update():
         stepping_kind = "step"
 
     if(select.value == "Poisson 5x5"):
-        if ordering_kind == 1: # ND
-            sv = SpandVisualizer("neglapl_2_5.mm", "5x5.mm", stepping_kind, "neglapl_2_5.mm.ndperm")
-        else:
-            sv = SpandVisualizer("neglapl_2_5.mm", "5x5.mm", stepping_kind, None)
+        matrix_file = "matrices/neglapl_2_5.mm"
+        coo_file = "matrices/5x5.mm"
     elif(select.value == "Poisson 16x16"):
-        if ordering_kind == 1: # ND
-            sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, "neglapl_2_16.mm.ndperm")
-        else:
-            sv = SpandVisualizer("neglapl_2_16.mm", "16x16.mm", stepping_kind, None)
+        matrix_file = "matrices/neglapl_2_16.mm"
+        coo_file = "matrices/16x16.mm"
     elif(select.value == "Poisson 32x32"):
-        if ordering_kind == 1: # ND
-            sv = SpandVisualizer("neglapl_2_32.mm", "32x32.mm", stepping_kind, "neglapl_2_32.mm.ndperm")
-        else:
-            sv = SpandVisualizer("neglapl_2_32.mm", "32x32.mm", stepping_kind, None)
+        matrix_file = "matrices/neglapl_2_32.mm"
+        coo_file = "matrices/32x32.mm"
     elif(select.value == "Naca 8"):
-        if ordering_kind == 1: # ND
-            sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm", stepping_kind, "naca8_jac_trimmed.mm.ndperm")
-        else:
-            sv = SpandVisualizer("naca8_jac_trimmed.mm", "naca8_coo_trimmed.mm", stepping_kind, None)
+        matrix_file = "matrices/naca8_jac_trimmed.mm"
+        coo_file = "matrices/naca8_coo_trimmed.mm"
+    
+    if ordering_kind == 1: # ND
+        perm_file = matrix_file + ".ndperm"
+    else:
+        perm_file = None
+    
+    sv = SpandVisualizer(matrix_file, coo_file, stepping_kind, perm_file)
     document = column(row(select, width=600), row(ordering, width=600), sv.get_layout())
     curdoc().clear()
     curdoc().add_root(document)
