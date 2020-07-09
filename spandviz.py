@@ -372,7 +372,7 @@ class SpandVisualizer:
 
 select = Select(value="Poisson 5x5", options=["Poisson 5x5", "Poisson 16x16", "Poisson 32x32", "Naca 8"], width=200)
 ordering = RadioButtonGroup(labels=["Manual ordering", "Nested Dissection", "Topological"], active=0, width=400)
-title = Div(text="""<h1>spaND visualizationt tool</h1><p>Scroll down for help</p>""")
+title = Div(text="""<h1>spaND visualization tool</h1><p>Scroll down for help</p>""")
 
 description = Div(text=\
     """ <p>This tools lets you explore elimination (and sparsification) orders and how they affect a matrix sparsity pattern.
